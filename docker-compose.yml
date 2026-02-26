@@ -177,7 +177,7 @@ services:
     container_name: ea-video-frontend
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-58101}:80"
+      - "${FRONTEND_PORT:-58101}:443"
     depends_on:
       - backend
     networks:
