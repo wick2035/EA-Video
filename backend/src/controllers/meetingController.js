@@ -110,6 +110,9 @@ exports.getJoinInfo = async (req, res, next) => {
     if (err.message.includes('not found')) {
       return res.status(404).json({ error: err.message });
     }
+    if (err.message.includes('not joinable')) {
+      return res.status(403).json({ error: err.message });
+    }
     next(err);
   }
 };

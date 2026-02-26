@@ -225,13 +225,29 @@ class MeetingService {
     });
     if (!meeting) throw new Error('Meeting not found');
 
+    // Block joining meetings that are not in a joinable state
+    const joinableStatuses = ['scheduled', 'in_progress'];
+    if (!joinableStatuses.includes(meeting.status)) {
+      throw new Error(`Meeting is not joinable (status: ${meeting.status})`);
+    }
+
+    // Calculate JWT expiry based on remaining meeting time
+    let expiryMinutes;
+    if (meeting.status === 'in_progress' && meeting.actual_start_at) {
+      const elapsedMs = Date.now() - new Date(meeting.actual_start_at).getTime();
+      const remainingMs = meeting.max_duration_minutes * 60 * 1000 - elapsedMs;
+      expiryMinutes = Math.max(1, Math.ceil(remainingMs / 60000) + 2);
+    } else {
+      expiryMinutes = meeting.max_duration_minutes + 10;
+    }
+
     const user = role === 'doctor' ? meeting.doctor : meeting.patient;
     const token = jitsiService.generateToken(meeting.room_name, {
       uuid: user.uuid,
       name: user.name,
       email: user.email,
       isModerator: role === 'doctor',
-    });
+    }, expiryMinutes);
     const joinUrl = jitsiService.buildJoinUrl(meeting.room_name, token);
 
     return {

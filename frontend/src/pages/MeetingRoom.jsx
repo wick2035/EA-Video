@@ -1,6 +1,6 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Card, Descriptions, Tag, Button, Statistic, Alert, message, Space } from 'antd';
+import { Card, Descriptions, Tag, Button, Statistic, Alert, message, Space, Modal, notification } from 'antd';
 import { getMeeting, getMeetingJoinInfo, endMeeting } from '../api/client';
 import useSocket from '../hooks/useSocket';
 import dayjs from 'dayjs';
@@ -17,9 +17,29 @@ export default function MeetingRoom() {
   const [joinInfo, setJoinInfo] = useState(null);
   const [countdown, setCountdown] = useState(null);
   const [warning, setWarning] = useState(null);
-  const iframeRef = useRef(null);
+  const [jitsiReady, setJitsiReady] = useState(false);
+
+  const jitsiContainerRef = useRef(null);
+  const jitsiApiRef = useRef(null);
   const timerRef = useRef(null);
 
+  const jitsiDomain = (import.meta.env.VITE_JITSI_DOMAIN || 'meet.localhost:8443');
+
+  // --- Load Jitsi External API script ---
+  useEffect(() => {
+    if (window.JitsiMeetExternalAPI) {
+      setJitsiReady(true);
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = `https://${jitsiDomain}/external_api.js`;
+    script.async = true;
+    script.onload = () => setJitsiReady(true);
+    script.onerror = () => message.error('Failed to load Jitsi API script');
+    document.head.appendChild(script);
+  }, [jitsiDomain]);
+
+  // --- Load meeting data ---
   useEffect(() => {
     loadMeeting();
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
@@ -32,14 +52,75 @@ export default function MeetingRoom() {
       if (m.status === 'in_progress' && m.actual_start_at) {
         startCountdown(m.actual_start_at, m.max_duration_minutes);
       }
-      // Get doctor join info for iframe
-      const info = await getMeetingJoinInfo(uuid, 'doctor');
-      setJoinInfo(info);
+      if (['scheduled', 'in_progress'].includes(m.status)) {
+        try {
+          const info = await getMeetingJoinInfo(uuid, 'doctor');
+          setJoinInfo(info);
+        } catch {
+          setJoinInfo(null);
+        }
+      } else {
+        setJoinInfo(null);
+      }
     } catch {
       message.error('Failed to load meeting');
     }
   };
 
+  // --- Initialize Jitsi External API ---
+  useEffect(() => {
+    if (!jitsiReady || !joinInfo || meeting?.status !== 'in_progress' || !jitsiContainerRef.current) {
+      return;
+    }
+    if (jitsiApiRef.current) {
+      jitsiApiRef.current.dispose();
+      jitsiApiRef.current = null;
+    }
+
+    const api = new window.JitsiMeetExternalAPI(jitsiDomain, {
+      roomName: joinInfo.roomName,
+      jwt: joinInfo.jwt,
+      parentNode: jitsiContainerRef.current,
+      width: '100%',
+      height: '100%',
+      configOverwrite: {
+        prejoinPageEnabled: false,
+        disableDeepLinking: true,
+      },
+      interfaceConfigOverwrite: {
+        SHOW_JITSI_WATERMARK: false,
+      },
+    });
+
+    jitsiApiRef.current = api;
+
+    // Ensure iframe has WebRTC permissions (camera/mic in cross-origin iframe)
+    const iframe = api.getIFrame();
+    if (iframe) {
+      iframe.allow = 'camera; microphone; display-capture; autoplay; clipboard-write; encrypted-media';
+    }
+
+    return () => {
+      if (jitsiApiRef.current) {
+        jitsiApiRef.current.dispose();
+        jitsiApiRef.current = null;
+      }
+    };
+  }, [jitsiReady, joinInfo, meeting?.status]);
+
+  // --- Force hangup helper ---
+  const forceHangup = useCallback(() => {
+    if (jitsiApiRef.current) {
+      try {
+        jitsiApiRef.current.executeCommand('hangup');
+      } catch {
+        try { jitsiApiRef.current.dispose(); } catch {}
+        jitsiApiRef.current = null;
+      }
+    }
+  }, []);
+
+  // --- Countdown timer ---
   const startCountdown = (startAt, maxMinutes) => {
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
@@ -48,29 +129,70 @@ export default function MeetingRoom() {
       if (remaining <= 0) {
         setCountdown(0);
         clearInterval(timerRef.current);
+        forceHangup();
       } else {
         setCountdown(Math.floor(remaining));
       }
     }, 1000);
   };
 
+  // --- Duration warning handler ---
+  const handleDurationWarning = useCallback((remainingMinutes) => {
+    setWarning(`${remainingMinutes} minute(s) remaining`);
+
+    if (remainingMinutes === 5) {
+      notification.warning({
+        message: 'Meeting Time Warning',
+        description: 'Only 5 minutes remaining in this consultation. Please begin wrapping up.',
+        duration: 10,
+        placement: 'topRight',
+      });
+    } else if (remainingMinutes === 1) {
+      Modal.warning({
+        title: 'Meeting Ending Soon',
+        content: 'Only 1 minute remaining! The meeting will be automatically ended when time expires.',
+        okText: 'Understood',
+      });
+    }
+
+    if (jitsiApiRef.current) {
+      try {
+        jitsiApiRef.current.executeCommand('showNotification', {
+          title: 'Time Warning',
+          description: `${remainingMinutes} minute(s) remaining in this consultation.`,
+          type: 'warning',
+          timeout: 'medium',
+        });
+      } catch {}
+    }
+  }, []);
+
+  // --- Socket.io events (join both dashboard + meeting room) ---
   useSocket({
     'meeting:duration-warning': (data) => {
-      if (data.meetingUuid === uuid) setWarning(`${data.remainingMinutes} minute(s) remaining`);
+      if (data.meetingUuid === uuid) {
+        handleDurationWarning(data.remainingMinutes);
+      }
     },
     'meeting:auto-ended': (data) => {
       if (data.meetingUuid === uuid) {
-        message.info('Meeting auto-ended (timeout)');
-        loadMeeting();
+        forceHangup();
+        Modal.info({
+          title: 'Meeting Ended',
+          content: 'This meeting has been automatically ended because the allocated time has expired.',
+          onOk: () => loadMeeting(),
+        });
       }
     },
     'meeting:ended': (data) => {
       if (data.meetingUuid === uuid) loadMeeting();
     },
-  });
+  }, ['dashboard', { type: 'meeting', id: uuid }]);
 
+  // --- End meeting handler ---
   const handleEnd = async () => {
     try {
+      forceHangup();
       await endMeeting(uuid, 'normal');
       message.success('Meeting ended');
       loadMeeting();
@@ -88,19 +210,14 @@ export default function MeetingRoom() {
 
   const countdownColor = countdown === null ? '#1890ff' : countdown > 300 ? '#52c41a' : countdown > 60 ? '#faad14' : '#ff4d4f';
 
-  const jitsiDomain = (import.meta.env.VITE_JITSI_DOMAIN || 'meet.localhost:8443');
-
   return (
     <div style={{ display: 'flex', gap: 16, height: 'calc(100vh - 180px)' }}>
       {/* Left: Jitsi Room */}
       <div style={{ flex: 7, minHeight: 500 }}>
         {joinInfo && meeting?.status === 'in_progress' ? (
-          <iframe
-            ref={iframeRef}
-            src={joinInfo.joinUrl}
-            style={{ width: '100%', height: '100%', border: 'none', borderRadius: 8 }}
-            allow="camera; microphone; display-capture; autoplay; clipboard-write"
-            allowFullScreen
+          <div
+            ref={jitsiContainerRef}
+            style={{ width: '100%', height: '100%', borderRadius: 8, overflow: 'hidden' }}
           />
         ) : (
           <Card style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
