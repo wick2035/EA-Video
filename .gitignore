@@ -1,0 +1,10 @@
+node_modules/
+dist/
+build/
+.env
+*.log
+jitsi-cfg/
+*.pem
+*.key
+.DS_Store
+Thumbs.db

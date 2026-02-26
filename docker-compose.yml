@@ -1,0 +1,193 @@
+services:
+  # ============================================
+  # DATABASE
+  # ============================================
+  mysql:
+    image: mysql:8.0
+    container_name: ea-video-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: 925c87507578344e
+      MYSQL_DATABASE: ea_video
+      MYSQL_USER: ea_video_user
+      MYSQL_PASSWORD: myK5drp0j4fU6R2omYPsr4aNqN08uCsw
+    ports:
+      - "${MYSQL_PORT:-58107}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - ea-video-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # COTURN (TURN/STUN Server)
+  # Ports 58105 (STUN/TURN), 58106 (TURNS), 58110-58200 (relay)
+  # ============================================
+  coturn:
+    image: coturn/coturn:latest
+    container_name: ea-video-coturn
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./coturn/turnserver.conf:/etc/turnserver.conf:ro
+    command: ["-c", "/etc/turnserver.conf"]
+
+  # ============================================
+  # JITSI MEET STACK
+  # ============================================
+  jitsi-web:
+    image: jitsi/web:${JITSI_IMAGE_VERSION:-stable}
+    container_name: ea-video-jitsi-web
+    restart: unless-stopped
+    ports:
+      - "${JITSI_HTTPS_PORT:-58103}:443"
+    volumes:
+      - ${CONFIG_DIR:-./jitsi-cfg}/web:/config
+      - ${CONFIG_DIR:-./jitsi-cfg}/transcripts:/usr/share/jitsi-meet/transcripts
+      - ./jitsi/custom-config.js:/config/custom-config.js:ro
+      - ./jitsi/custom-interface_config.js:/config/custom-interface_config.js:ro
+    environment:
+      - ENABLE_AUTH=1
+      - AUTH_TYPE=jwt
+      - JWT_APP_ID=${JWT_APP_ID}
+      - JWT_APP_SECRET=${JWT_APP_SECRET}
+      - JWT_ACCEPTED_ISSUERS=${JWT_APP_ID}
+      - JWT_ACCEPTED_AUDIENCES=${JWT_APP_ID}
+      - ENABLE_GUESTS=0
+      - PUBLIC_URL=${JITSI_PUBLIC_URL:-https://meet.localhost:58103}
+      - TZ=Asia/Shanghai
+      - TURN_HOST=${TURN_HOST}
+      - TURN_PORT=${TURN_PORT:-58105}
+      - TURN_TRANSPORT=tcp
+      - TURNS_HOST=${TURN_HOST}
+      - TURNS_PORT=${TURNS_PORT:-58106}
+    networks:
+      meet.jitsi:
+        aliases:
+          - meet.jitsi
+
+  prosody:
+    image: jitsi/prosody:${JITSI_IMAGE_VERSION:-stable}
+    container_name: ea-video-prosody
+    restart: unless-stopped
+    expose:
+      - "5222"
+      - "5347"
+      - "5280"
+    volumes:
+      - ${CONFIG_DIR:-./jitsi-cfg}/prosody/config:/config
+      - ${CONFIG_DIR:-./jitsi-cfg}/prosody/prosody-plugins-custom:/prosody-plugins-custom
+    environment:
+      - ENABLE_AUTH=1
+      - AUTH_TYPE=jwt
+      - JWT_APP_ID=${JWT_APP_ID}
+      - JWT_APP_SECRET=${JWT_APP_SECRET}
+      - JWT_ACCEPTED_ISSUERS=${JWT_APP_ID}
+      - JWT_ACCEPTED_AUDIENCES=${JWT_APP_ID}
+      - JWT_ALLOW_EMPTY=0
+      - TURN_HOST=${TURN_HOST}
+      - TURN_PORT=${TURN_PORT:-58105}
+      - TURN_CREDENTIALS=${TURN_CREDENTIALS}
+      - TURNS_HOST=${TURN_HOST}
+      - TURNS_PORT=${TURNS_PORT:-58106}
+      - JICOFO_AUTH_PASSWORD=${JICOFO_AUTH_PASSWORD}
+      - JVB_AUTH_PASSWORD=${JVB_AUTH_PASSWORD}
+      - TZ=Asia/Shanghai
+    networks:
+      meet.jitsi:
+        aliases:
+          - xmpp.meet.jitsi
+
+  jicofo:
+    image: jitsi/jicofo:${JITSI_IMAGE_VERSION:-stable}
+    container_name: ea-video-jicofo
+    restart: unless-stopped
+    volumes:
+      - ${CONFIG_DIR:-./jitsi-cfg}/jicofo:/config
+    environment:
+      - JICOFO_AUTH_PASSWORD=${JICOFO_AUTH_PASSWORD}
+      - XMPP_SERVER=xmpp.meet.jitsi
+      - TZ=Asia/Shanghai
+    depends_on:
+      - prosody
+    networks:
+      - meet.jitsi
+
+  jvb:
+    image: jitsi/jvb:${JITSI_IMAGE_VERSION:-stable}
+    container_name: ea-video-jvb
+    restart: unless-stopped
+    ports:
+      - "${JVB_PORT:-58104}:10000/udp"
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ${CONFIG_DIR:-./jitsi-cfg}/jvb:/config
+    environment:
+      - JVB_AUTH_PASSWORD=${JVB_AUTH_PASSWORD}
+      - JVB_ADVERTISE_IPS=${JVB_ADVERTISE_IPS}
+      - JVB_STUN_SERVERS=${TURN_HOST}:${TURN_PORT:-58105}
+      - XMPP_SERVER=xmpp.meet.jitsi
+      - TZ=Asia/Shanghai
+    depends_on:
+      - prosody
+    networks:
+      - meet.jitsi
+
+  # ============================================
+  # APPLICATION BACKEND
+  # ============================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ea-video-backend
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-58102}:3000"
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_NAME=ea_video
+      - DB_USER=${MYSQL_USER}
+      - DB_PASSWORD=${MYSQL_PASSWORD}
+      - JWT_APP_ID=${JWT_APP_ID}
+      - JWT_APP_SECRET=${JWT_APP_SECRET}
+      - JITSI_URL=${JITSI_PUBLIC_URL:-https://meet.localhost:58103}
+      - API_SECRET=${API_SECRET}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - ea-video-net
+      - meet.jitsi
+
+  # ============================================
+  # APPLICATION FRONTEND
+  # ============================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ea-video-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-58101}:80"
+    depends_on:
+      - backend
+    networks:
+      - ea-video-net
+
+networks:
+  meet.jitsi:
+    driver: bridge
+  ea-video-net:
+    driver: bridge
+
+volumes:
+  mysql_data:
