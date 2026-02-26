@@ -81,7 +81,7 @@ services:
       - "5280"
     volumes:
       - ${CONFIG_DIR:-./jitsi-cfg}/prosody/config:/config
-      - ${CONFIG_DIR:-./jitsi-cfg}/prosody/prosody-plugins-custom:/prosody-plugins-custom
+      - ./prosody/custom-plugins:/prosody-plugins-custom
     environment:
       - ENABLE_AUTH=1
       - AUTH_TYPE=jwt
@@ -97,6 +97,7 @@ services:
       - TURNS_PORT=${TURNS_PORT:-58106}
       - JICOFO_AUTH_PASSWORD=${JICOFO_AUTH_PASSWORD}
       - JVB_AUTH_PASSWORD=${JVB_AUTH_PASSWORD}
+      - XMPP_MUC_MODULES=end_meeting
       - TZ=Asia/Shanghai
     networks:
       meet.jitsi:

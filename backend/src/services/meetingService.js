@@ -2,6 +2,7 @@ const { v4: uuidv4 } = require('uuid');
 const { Meeting, Patient, Doctor, AuditLog } = require('../models');
 const jitsiService = require('./jitsiService');
 const durationService = require('./durationService');
+const prosodyService = require('./prosodyService');
 const logger = require('../utils/logger');
 
 class MeetingService {
@@ -176,6 +177,13 @@ class MeetingService {
         duration: meeting.duration_seconds,
         reason,
       });
+    }
+
+    // Destroy Jitsi room on Prosody to kick all participants
+    try {
+      await prosodyService.destroyRoom(meeting.room_name);
+    } catch (err) {
+      logger.warn(`Failed to destroy Jitsi room: ${err.message}`);
     }
 
     return meeting.toJSON();
