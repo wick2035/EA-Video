@@ -1,0 +1,31 @@
+<style>
+  #ea-no-meeting {
+    display: none;
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: #1a1a2e;
+    z-index: 10000;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  #ea-no-meeting p {
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 18px;
+    margin: 6px 0;
+    text-align: center;
+    line-height: 1.6;
+  }
+</style>
+<div id="ea-no-meeting">
+  <p>您目前暂无获许访问的会议室</p>
+  <p>请使用 EyeAgent 授权的系统链接</p>
+</div>
+<script>
+  // Only show on root URL (welcome page), not on meeting room URLs
+  if (window.location.pathname === '/' || window.location.pathname === '') {
+    document.getElementById('ea-no-meeting').style.display = 'flex';
+  }
+</script>

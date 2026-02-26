@@ -51,6 +51,7 @@ services:
       - ${CONFIG_DIR:-./jitsi-cfg}/transcripts:/usr/share/jitsi-meet/transcripts
       - ./jitsi/custom-config.js:/config/custom-config.js:ro
       - ./jitsi/custom-interface_config.js:/config/custom-interface_config.js:ro
+      - ./jitsi/custom-body.html:/usr/share/jitsi-meet/body.html:ro
     environment:
       - ENABLE_AUTH=1
       - AUTH_TYPE=jwt

@@ -25,3 +25,7 @@ config.localSubject = 'EA-Video Medical Consultation';
 
 // Disable deep linking (stay in browser)
 config.disableDeepLinking = true;
+
+// Disable welcome page — prevents unauthorized meeting creation
+// Users who visit the root URL will see a blank page instead of the room creation form
+config.enableWelcomePage = false;
