@@ -1,5 +1,7 @@
 # EA-Video 在线问诊系统 — 部署指南
 
+> 当前服务器使用共享 MySQL：后端连接 `ops-mysql:3307`，MySQL 直接发布 `3307:3307`，不再使用 Nginx 数据库转发或 60107 入口。数据库由 `/opt/websites-ops` 管理；本项目的 `legacy-databases` 服务仅用于历史恢复，默认不启动且不发布宿主机端口。Redis 由其他业务使用，保留 6380 映射。
+
 ## 架构概览
 
 ```
@@ -8,7 +10,7 @@
 │                                                                  │
 │   ┌──────────┐  ┌──────────┐  ┌─────────┐  ┌──────┐  ┌──────┐ │
 │   │  MySQL   │  │  Jitsi   │  │ Prosody │  │Jicofo│  │ JVB  │ │
-│   │  :58107  │  │  Web     │  │ (XMPP)  │  │      │  │:58104│ │
+│   │  :3307   │  │  Web     │  │ (XMPP)  │  │      │  │:58104│ │
 │   │          │  │  :58103  │  │         │  │      │  │(UDP) │ │
 │   └──────────┘  └──────────┘  └─────────┘  └──────┘  └──────┘ │
 │                                                                  │
@@ -92,7 +94,7 @@ sudo ufw allow 58104/udp   # JVB 视频媒体流
 sudo ufw allow 58105/tcp   # coturn TURN (TCP)
 sudo ufw allow 58105/udp   # coturn STUN/TURN (UDP)
 sudo ufw allow 58106/tcp   # coturn TURNS (TLS)
-sudo ufw allow 58107/tcp   # MySQL（可选，仅远程调试需要）
+sudo ufw allow 3307/tcp   # MySQL（可选，仅远程调试需要）
 sudo ufw allow 58110:58200/udp   # coturn 中继端口池
 sudo ufw allow 58110:58200/tcp   # coturn 中继端口池 (TCP)
 
@@ -160,7 +162,7 @@ nano .env
 MYSQL_ROOT_PASSWORD=你的MySQL_root密码_要强密码
 MYSQL_USER=ea_video_user
 MYSQL_PASSWORD=你的MySQL用户密码_要强密码
-MYSQL_PORT=58107
+DB_PORT=3307
 
 # --- Jitsi JWT Authentication ---
 JWT_APP_ID=ea_video_telehealth
@@ -523,13 +525,13 @@ npm run dev
 
 ### 5.1 从外部连接数据库
 
-如果你开放了 58107 端口，可以用 MySQL 客户端（Navicat、DBeaver、MySQL Workbench 等）远程连接：
+如果你开放了 3307 端口，可以用 MySQL 客户端（Navicat、DBeaver、MySQL Workbench 等）远程连接：
 
 
 | 参数       | 值                   |
 | -------- | ------------------- |
 | Host     | 你的服务器 IP            |
-| Port     | 58107               |
+| Port     | 3307                |
 | User     | ea_video_user       |
 | Password | 你设置的 MYSQL_PASSWORD |
 | Database | ea_video            |
@@ -819,6 +821,6 @@ docker exec -it ea-video-mysql bash
 | 58104       | UDP     | JVB 视频媒体流               | **必须**     |
 | 58105       | UDP+TCP | coturn STUN/TURN        | **必须**     |
 | 58106       | TCP     | coturn TURNS (TLS)      | **必须**     |
-| 58107       | TCP     | MySQL                   | 可选（远程调试用）  |
+| 3307        | TCP     | MySQL                   | 可选（远程调试用）  |
 | 58110-58200 | UDP+TCP | coturn 中继端口池            | **必须**     |
 

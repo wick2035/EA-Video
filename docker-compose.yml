@@ -11,8 +11,6 @@ services:
       MYSQL_DATABASE: ea_video
       MYSQL_USER: ea_video_user
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-    ports:
-    - ${MYSQL_PORT:-58107}:3306
     volumes:
     - mysql_data:/var/lib/mysql
     - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
@@ -156,7 +154,7 @@ services:
     environment:
       NODE_ENV: production
       DB_HOST: ops-mysql
-      DB_PORT: '3306'
+      DB_PORT: ${DB_PORT:-3307}
       DB_NAME: ea_video
       DB_USER: ${MYSQL_USER}
       DB_PASSWORD: ${MYSQL_PASSWORD}
